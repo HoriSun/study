@@ -13,7 +13,7 @@ def data_gen(a,b,c,e,n,nnoise,rmin,rmax):
     % nnoise: number of noise points
     % rmin, rmax: data range
     '''
-    assert(a*b!=0)
+    assert(a!=0 or b!=0)
     a = float(a)
     b = float(b)
     c = float(c)
@@ -22,6 +22,8 @@ def data_gen(a,b,c,e,n,nnoise,rmin,rmax):
 
     r = np.random.rand(n) * rd + rmin
 
+    r[-2:] = [rmin, rmax]
+    
     if(b == 0):
         y = r
         x = np.zeros(n) + c/a
@@ -32,8 +34,10 @@ def data_gen(a,b,c,e,n,nnoise,rmin,rmax):
         x = r
         y = ( c - a*x ) / b
 
+    #plt.plot(x[-2:],y[-2:],color="purple",linewidth=3)
+
     data = np.concatenate([[x],[y]], axis=0).T
-    data += np.random.random([n,2]) * e
+    data += (np.random.random([n,2]) * 2 - 1) * e
     
     data_x_min = data[:,0].min()
     data_x_max = data[:,0].max()
@@ -42,6 +46,21 @@ def data_gen(a,b,c,e,n,nnoise,rmin,rmax):
 
     data_x_range = data_x_max - data_x_min
     data_y_range = data_y_max - data_y_min
+
+    if(a == 0):
+        data_y_min = data_y_min - (data_x_range-data_y_range)/2.0
+        data_y_range = data_x_range
+    elif(b == 0):
+        data_x_min = data_x_min - (data_y_range-data_x_range)/2.0
+        data_x_range = data_y_range
+    elif(a/b < 1e-1):
+        data_y_min = data_y_min - (data_x_range-data_y_range)/2.0
+        data_y_range = data_x_range
+    elif(b/a < 1e-1):
+        data_x_min = data_x_min - (data_y_range-data_x_range)/2.0
+        data_x_range = data_y_range
+    else:
+        pass
 
     data_noise = np.random.random([nnoise, 2])
     data_noise[:,0] = data_noise[:,0] * data_x_range + data_x_min
@@ -190,7 +209,7 @@ class RANSAC_Line(object):
             spidx = np.random.randint( low = 0, 
                                        high = self.n-1, 
                                        size = self.nmin ) # sample
-            sp = data[spidx,:]
+            sp = self.data[spidx,:]
             self.calc(sp)
 
             while ( ( self.nin >= self.n_in_min ) and
@@ -201,7 +220,7 @@ class RANSAC_Line(object):
                 self.pin = np.abs(self.d) <= self.dmax
                 print self.d1,self.d2,self.nin,self.rin
                 
-                sp = data[self.pin]
+                sp = self.data[self.pin]
 
                 self.calc(sp)
                 
@@ -244,12 +263,11 @@ class RANSAC_Line(object):
 
 
 
-
-if __name__ == "__main__":
-    a = float(-1)
-    b = float(-2)
-    c = float(3)
-    e = 0.5
+def test(a,b,c,e):
+    a = float(a)
+    b = float(b)
+    c = float(c)
+    e = float(e)
     n = 100
     nnoise = 300
     rmin = -10
@@ -267,8 +285,17 @@ if __name__ == "__main__":
     ymin = data[:,1].min()
     ymax = data[:,1].max()
 
-    ori_line_x = np.array([rmin,rmax])
-    ori_line_y = ( c - a*ori_line_x ) / b
+    r = np.array([rmin,rmax])
+
+    if(b == 0):
+        ori_line_y = r
+        ori_line_x = np.zeros(2) + c/a
+    elif(a == 0):
+        ori_line_x = r
+        ori_line_y = np.zeros(2) + c/b
+    else:
+        ori_line_x = r
+        ori_line_y = ( c - a*ori_line_x ) / b
 
 
     if(ori_line_y.min()<ymin or ori_line_y.max()>ymax):
@@ -276,15 +303,29 @@ if __name__ == "__main__":
         ori_line_x = ( c - b*ori_line_y ) / a
 
     plt.scatter(data[:,0], data[:,1], color="black")
-    plt.scatter(clean_data[:,0], clean_data[:,1], color="red", s=20, linewidth=5)
+    #plt.scatter(clean_data[:,0], clean_data[:,1], color="red", s=20, linewidth=5)
 
-    plt.plot(ori_line_x,ori_line_y,color="green",linewidth=2)
+    #plt.plot(ori_line_x,ori_line_y,color="green",linewidth=2)
+
+    plt.show()
+
+    def stop_cond(it, rin):
+        ret = (rin >= 0.25)
+        if(ret):
+            print "total iteration:",it
+        return ret 
 
     b1, b2, pin = RANSAC_Line( data = data,
                                nmin = 2,#n * 0.5,
                                niter = 10000, 
                                dmax = e, 
-                               ratio_in_min = 0.2 ).run()
+                               ratio_in_min = 0.2,
+                               stop_cond = stop_cond ).run()
+
+    plt.scatter(data[:,0], data[:,1], color="black")
+    plt.scatter(clean_data[:,0], clean_data[:,1], color="red", s=20, linewidth=5)
+
+    plt.plot(ori_line_x,ori_line_y,color="green",linewidth=2)
 
     #b1, b2 = LSE(data)
     
@@ -292,8 +333,14 @@ if __name__ == "__main__":
     line_y = b1 + b2*line_x
 
 
-    if(line_y.min()<ymin or line_y.max()>ymax):
-        line_y = np.array([ymin,ymax])
+    #if(line_y.min()<ymin or line_y.max()>ymax):
+    #    line_y = np.array([ymin,ymax])
+    #    line_x = (line_y - b1)/b2
+    if(line_y.min()<ymin):
+        line_y = np.array([ymin,line_y.max()])
+        line_x = (line_y - b1)/b2
+    if(line_y.max()>ymax):
+        line_y = np.array([line_y.min(),ymax])
         line_x = (line_y - b1)/b2
         
     datain = data[pin]
@@ -303,3 +350,13 @@ if __name__ == "__main__":
 
     plt.show()
     
+
+
+if __name__ == "__main__":
+    #test(-1,-2,3,0.5)
+    #test(0,1,3,0.5)
+    #test(1,0,3,0.5)
+    #test(0.1,10,3,0.5)
+    #test(10,0.1,3,0.5)
+    test(0.1,1,3,0.01)
+    #test(1,0.1,3,0.5)
